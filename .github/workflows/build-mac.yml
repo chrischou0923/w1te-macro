@@ -26,7 +26,8 @@ jobs:
 
       - name: Build macOS .app
         run: |
-          pyinstaller --windowed --onefile w1te_macro.py
+          pyinstaller --windowed --onefile w1te_macro.py/w1te_macro.py
+
 
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
