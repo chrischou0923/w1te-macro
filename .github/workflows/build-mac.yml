@@ -54,9 +54,10 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build Windows exe
+      - name: Build macOS app
         run: 
-          pyinstaller --noconsole --onefile --icon icon.ico --name W1teMacro w1te_macro.py/w1te_macro.py
+         pyinstaller --windowed --onefile --icon icon.icns --name W1teMacro w1te_macro.py/w1te_macro.py
+
 
 
       - name: Upload Windows EXE
