@@ -3,6 +3,7 @@ from ttkbootstrap.constants import *
 from pynput import keyboard, mouse
 import threading
 import time
+import tkinter.font as tkfont
 
 # ======================
 # App Config
@@ -29,7 +30,13 @@ kb_listener = None
 ms_listener = None
 
 capture_mode = False
-pressed_keys = set()
+pressed_keys = set()  # used for locks
+
+LOCK_HOLD = "HOLD_LOCK"
+LOCK_TOGGLE = "TOGGLE_LOCK"
+LOCK_MOUSE_TOGGLE = "MOUSE_TOGGLE_LOCK"
+
+fullscreen = False
 
 # ======================
 # Languages
@@ -55,6 +62,7 @@ LANG_EN = {
     "light": "Light",
     "dark": "Dark",
     "language": "Language",
+    "warn_same_key": "⚠ Hotkey equals output key. Please use a different hotkey (e.g., F1).",
 }
 
 LANG_ZH = {
@@ -78,6 +86,7 @@ LANG_ZH = {
     "light": "白",
     "dark": "黑",
     "language": "語言",
+    "warn_same_key": "⚠ 熱鍵與輸出鍵相同，可能自觸發。請換別的熱鍵（例如 F1）。",
 }
 
 LANG_KR = {
@@ -101,9 +110,24 @@ LANG_KR = {
     "light": "라이트",
     "dark": "다크",
     "language": "언어",
+    "warn_same_key": "⚠ 핫키가 출력 키와 같아요. 다른 핫키로 바꿔주세요 (예: F1).",
 }
 
 current_lang = LANG_EN  # actual content language (set by splash selection)
+
+# ======================
+# UI Thread Helpers
+# ======================
+MAIN_THREAD = None
+
+def ui(fn):
+    """Run UI updates safely on Tk main thread."""
+    if MAIN_THREAD is None:
+        return
+    if threading.current_thread() is MAIN_THREAD:
+        fn()
+    else:
+        root.after(0, fn)
 
 # ======================
 # UI Helpers
@@ -113,24 +137,35 @@ def apply_theme():
     root.style.theme_use(theme)
 
 def set_status(text, style):
-    status_var.set(text)
-    status_badge.configure(bootstyle=style)
+    def _():
+        status_var.set(text)
+        status_badge.configure(bootstyle=style)
+    ui(_)
 
 def update_hotkey_info():
     if hotkey_kind == "mouse":
         if hotkey_mouse_btn == mouse.Button.x1:
-            hotkey_info_var.set(f"{current_lang['hotkey_now']} Mouse XBUTTON1")
+            txt = f"{current_lang['hotkey_now']} Mouse XBUTTON1"
         elif hotkey_mouse_btn == mouse.Button.x2:
-            hotkey_info_var.set(f"{current_lang['hotkey_now']} Mouse XBUTTON2")
+            txt = f"{current_lang['hotkey_now']} Mouse XBUTTON2"
         else:
-            hotkey_info_var.set(f"{current_lang['hotkey_now']} Mouse {hotkey_mouse_btn}")
-        return
-
-    if hotkey_type == "char":
-        hotkey_info_var.set(f"{current_lang['hotkey_now']} Keyboard '{hotkey_char.upper()}'")
+            txt = f"{current_lang['hotkey_now']} Mouse {hotkey_mouse_btn}"
     else:
-        name = str(hotkey_special).replace("Key.", "").upper()
-        hotkey_info_var.set(f"{current_lang['hotkey_now']} Keyboard {name}")
+        if hotkey_type == "char":
+            txt = f"{current_lang['hotkey_now']} Keyboard '{hotkey_char.upper()}'"
+        else:
+            name = str(hotkey_special).replace("Key.", "").upper()
+            txt = f"{current_lang['hotkey_now']} Keyboard {name}"
+
+    def _():
+        hotkey_info_var.set(txt)
+    ui(_)
+
+def check_self_trigger_warning():
+    conflict = (hotkey_kind == "keyboard" and hotkey_type == "char"
+                and hotkey_char.lower() == output_key.lower())
+    if conflict and (not capture_mode) and (not running):
+        set_status(current_lang["warn_same_key"], "warning")
 
 def update_language():
     global current_lang
@@ -175,6 +210,71 @@ def update_language():
         set_status(current_lang["status_wait"], "secondary")
 
     update_hotkey_info()
+    check_self_trigger_warning()
+
+# ======================
+# Auto UI Scaling (window resize -> font scales too)
+# ======================
+BASE_W, BASE_H = 580, 460
+SCALE_MIN, SCALE_MAX = 0.85, 1.80
+
+FONT_NAMES = ["TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont", "TkHeadingFont", "TkCaptionFont"]
+base_font_sizes = {}
+TITLE_BASE = 18
+
+_scale_job = None
+_last_scale = None
+
+def _clamp(v, lo, hi):
+    return lo if v < lo else hi if v > hi else v
+
+def apply_scale(scale: float):
+    """Apply Tk scaling + resize named fonts + resize title font."""
+    global _last_scale
+    scale = _clamp(scale, SCALE_MIN, SCALE_MAX)
+
+    # reduce jitter
+    if _last_scale is not None and abs(scale - _last_scale) < 0.03:
+        return
+    _last_scale = scale
+
+    try:
+        root.tk.call("tk", "scaling", scale)
+    except:
+        pass
+
+    for name, base_size in base_font_sizes.items():
+        try:
+            f = tkfont.nametofont(name)
+            new_size = int(base_size * scale)
+            if new_size == 0:
+                new_size = -1 if base_size < 0 else 1
+            f.configure(size=new_size)
+        except:
+            pass
+
+    # your title font is custom tuple, resize it too
+    try:
+        title_label.configure(font=("Segoe UI", max(12, int(TITLE_BASE * scale)), "bold"))
+    except:
+        pass
+
+def on_root_resize(event):
+    global _scale_job
+    if event.widget != root:
+        return
+
+    if _scale_job is not None:
+        try:
+            root.after_cancel(_scale_job)
+        except:
+            pass
+
+    w = max(1, root.winfo_width())
+    h = max(1, root.winfo_height())
+    target = min(w / BASE_W, h / BASE_H)
+
+    _scale_job = root.after(80, lambda: apply_scale(target))
 
 # ======================
 # Click Thread
@@ -190,42 +290,49 @@ def autoclicker_thread():
             time.sleep(0.01)
 
 # ======================
-# Hotkey Setters
+# Hotkey Setters (UI-safe)
 # ======================
 def set_hotkey_keyboard_char(ch: str):
-    global hotkey_kind, hotkey_type, hotkey_char, running
+    global hotkey_kind, hotkey_type, hotkey_char, running, capture_mode
     hotkey_kind = "keyboard"
     hotkey_type = "char"
     hotkey_char = (ch or "f").lower()[:1]
     running = False
+    capture_mode = False
     pressed_keys.clear()
 
-    hotkey_entry.delete(0, "end")
-    hotkey_entry.insert(0, hotkey_char)
-
-    set_status(current_lang["status_wait"], "secondary")
-    update_hotkey_info()
+    def _():
+        hotkey_entry.delete(0, "end")
+        hotkey_entry.insert(0, hotkey_char)
+        set_status(current_lang["status_wait"], "secondary")
+        update_hotkey_info()
+        check_self_trigger_warning()
+    ui(_)
 
 def set_hotkey_keyboard_special(key_obj):
-    global hotkey_kind, hotkey_type, hotkey_special, running
+    global hotkey_kind, hotkey_type, hotkey_special, running, capture_mode
     hotkey_kind = "keyboard"
     hotkey_type = "special"
     hotkey_special = key_obj
     running = False
+    capture_mode = False
     pressed_keys.clear()
 
     txt = str(key_obj).replace("Key.", "").upper()
-    hotkey_entry.delete(0, "end")
-    hotkey_entry.insert(0, txt)
 
-    set_status(current_lang["status_wait"], "secondary")
-    update_hotkey_info()
+    def _():
+        hotkey_entry.delete(0, "end")
+        hotkey_entry.insert(0, txt)
+        set_status(current_lang["status_wait"], "secondary")
+        update_hotkey_info()
+    ui(_)
 
 def set_hotkey_mouse(btn):
-    global hotkey_kind, hotkey_mouse_btn, running
+    global hotkey_kind, hotkey_mouse_btn, running, capture_mode
     hotkey_kind = "mouse"
     hotkey_mouse_btn = btn
     running = False
+    capture_mode = False
     pressed_keys.clear()
 
     if btn == mouse.Button.x1:
@@ -235,11 +342,12 @@ def set_hotkey_mouse(btn):
     else:
         txt = str(btn).upper()
 
-    hotkey_entry.delete(0, "end")
-    hotkey_entry.insert(0, txt)
-
-    set_status(current_lang["status_wait"], "secondary")
-    update_hotkey_info()
+    def _():
+        hotkey_entry.delete(0, "end")
+        hotkey_entry.insert(0, txt)
+        set_status(current_lang["status_wait"], "secondary")
+        update_hotkey_info()
+    ui(_)
 
 # ======================
 # Detect Mode
@@ -325,32 +433,38 @@ def on_press(key):
             keyboard.Key.f4, keyboard.Key.f5, keyboard.Key.f6,
             keyboard.Key.f7, keyboard.Key.f8, keyboard.Key.f9
         }:
-            capture_mode = False
             set_hotkey_keyboard_special(key)
             return
+
         try:
             ch = key.char
         except:
             return
+
         if ch:
-            capture_mode = False
             set_hotkey_keyboard_char(ch)
         return
 
     if hotkey_kind != "keyboard":
         return
 
+    # HOLD
     if mode_var.get() == "hold":
         if is_hotkey_pressed(key):
-            if "HOTKEY" in pressed_keys:
+            if LOCK_HOLD in pressed_keys:
                 return
-            pressed_keys.add("HOTKEY")
+            pressed_keys.add(LOCK_HOLD)
             running = True
             set_status(current_lang["status_run"], "success")
-            return
+        return
 
+    # TOGGLE (debounced)
     if mode_var.get() == "toggle":
         if is_hotkey_pressed(key):
+            if LOCK_TOGGLE in pressed_keys:
+                return
+            pressed_keys.add(LOCK_TOGGLE)
+
             running = not running
             set_status(current_lang["status_run"], "success" if running else "danger")
 
@@ -359,9 +473,16 @@ def on_release(key):
     if hotkey_kind != "keyboard":
         return
 
+    # release debounce lock for toggle
+    if mode_var.get() == "toggle":
+        if is_hotkey_pressed(key):
+            pressed_keys.discard(LOCK_TOGGLE)
+        return
+
+    # HOLD release
     if mode_var.get() == "hold":
         if is_hotkey_pressed(key):
-            pressed_keys.discard("HOTKEY")
+            pressed_keys.discard(LOCK_HOLD)
             running = False
             set_status(current_lang["status_stop"], "danger")
 
@@ -370,7 +491,6 @@ def on_click(x, y, button, pressed):
 
     # Detect mode: capture mouse button
     if capture_mode and pressed:
-        capture_mode = False
         set_hotkey_mouse(button)
         return
 
@@ -379,6 +499,7 @@ def on_click(x, y, button, pressed):
     if button != hotkey_mouse_btn:
         return
 
+    # HOLD
     if mode_var.get() == "hold":
         if pressed:
             running = True
@@ -388,10 +509,17 @@ def on_click(x, y, button, pressed):
             set_status(current_lang["status_stop"], "danger")
         return
 
+    # TOGGLE (debounced)
     if mode_var.get() == "toggle":
         if pressed:
+            if LOCK_MOUSE_TOGGLE in pressed_keys:
+                return
+            pressed_keys.add(LOCK_MOUSE_TOGGLE)
+
             running = not running
             set_status(current_lang["status_run"], "success" if running else "danger")
+        else:
+            pressed_keys.discard(LOCK_MOUSE_TOGGLE)
 
 def start_listeners():
     global kb_listener, ms_listener
@@ -429,29 +557,52 @@ def go_main_with_language(lang_choice: str):
     lang_choice in {"English","繁體中文","한국어"}
     Fade out -> swap frames -> fade in
     """
-    # lock buttons
     for b in splash_buttons:
         b.configure(state=DISABLED)
 
-    # set language var now
     lang_var.set(lang_choice)
 
     def swap_to_main():
         splash_frame.pack_forget()
         main_frame.pack(fill=BOTH, expand=True)
 
-        # apply language + theme + initial state
         update_language()
         apply_theme()
         apply_all_settings()
         update_hotkey_info()
         set_status(current_lang["status_wait"], "secondary")
 
-        # fade back in
+        # re-apply scale once main widgets exist
+        try:
+            w = max(1, root.winfo_width())
+            h = max(1, root.winfo_height())
+            apply_scale(min(w / BASE_W, h / BASE_H))
+        except:
+            pass
+
         fade_to(1.0, on_done=None)
 
-    # fade out then swap
     fade_to(0.0, on_done=swap_to_main)
+
+# ======================
+# Fullscreen / Maximize
+# ======================
+def toggle_fullscreen(event=None):
+    global fullscreen
+    fullscreen = not fullscreen
+    root.attributes("-fullscreen", fullscreen)
+
+def exit_fullscreen(event=None):
+    global fullscreen
+    fullscreen = False
+    root.attributes("-fullscreen", False)
+
+def toggle_maximize(event=None):
+    # Windows "zoomed" (safe try)
+    try:
+        root.state("zoomed" if root.state() != "zoomed" else "normal")
+    except:
+        pass
 
 # ======================
 # Build UI
@@ -461,8 +612,30 @@ root = ttk.Window(
     themename=LIGHT_THEME,
     size=(580, 460)
 )
-root.resizable(False, False)
 root.attributes("-alpha", 1.0)
+
+# allow resize + minimum size
+root.resizable(True, True)
+root.minsize(580, 460)
+
+# mark main thread
+MAIN_THREAD = threading.current_thread()
+
+# scaling: capture base font sizes (after root exists)
+for n in FONT_NAMES:
+    try:
+        f = tkfont.nametofont(n)
+        base_font_sizes[n] = int(f.cget("size"))
+    except:
+        pass
+
+# bind keys
+root.bind("<F11>", toggle_fullscreen)
+root.bind("<Escape>", exit_fullscreen)
+root.bind("<Control-m>", toggle_maximize)
+
+# bind resize scaling
+root.bind("<Configure>", on_root_resize)
 
 # ---------- Splash Frame ----------
 splash_frame = ttk.Frame(root, padding=22)
@@ -486,7 +659,6 @@ ttk.Label(
 btn_row = ttk.Frame(splash_card)
 btn_row.pack()
 
-# three buttons (each in its own language)
 splash_buttons = []
 
 b_zh = ttk.Button(btn_row, text="繁體中文", width=14, bootstyle="secondary-outline",
@@ -511,7 +683,7 @@ ttk.Label(
 ).pack(pady=(14, 0))
 
 # ---------- Main Frame ----------
-main_frame = ttk.Frame(root)  # will be packed after selection
+main_frame = ttk.Frame(root)
 
 container = ttk.Frame(main_frame, padding=18)
 container.pack(fill=BOTH, expand=True)
@@ -567,12 +739,12 @@ hotkey_info_var = ttk.StringVar(value="")
 hotkey_info_label = ttk.Label(card1, textvariable=hotkey_info_var, bootstyle="info")
 hotkey_info_label.pack(anchor=W, pady=(8, 0))
 
-# Card 2: Settings
+# Card 2: Settings (expand so resizing uses space)
 card2 = ttk.Labelframe(container, text=current_lang["card_settings"], padding=14, bootstyle="secondary")
-card2.pack(fill=X)
+card2.pack(fill=BOTH, expand=True)
 
 grid = ttk.Frame(card2)
-grid.pack(fill=X)
+grid.pack(fill=BOTH, expand=True)
 
 mode_label = ttk.Label(grid, text=current_lang["mode"])
 mode_label.grid(row=0, column=0, sticky=W, pady=6)
@@ -598,9 +770,8 @@ cps_combo = ttk.Combobox(
     grid,
     textvariable=cps_var,
     width=10,
-    values=["50", "100", "150", "200", "250", "300", "350", "450", "500"]
+    values=["10", "20", "30", "40", "50", "100", "150", "200", "250", "300", "350", "450", "500"]
 )
-
 cps_combo.grid(row=1, column=1, sticky=W, padx=10)
 cps_combo.bind("<<ComboboxSelected>>", apply_all_settings)
 
@@ -619,14 +790,41 @@ status_badge.pack(side=LEFT)
 lang_title = ttk.Label(footer, text=current_lang["language"], bootstyle="secondary")
 lang_title.pack(side=RIGHT, padx=(0, 8))
 
-lang_var = ttk.StringVar(value="English")  # default for main screen
+lang_var = ttk.StringVar(value="English")
 lang_menu = ttk.Combobox(footer, textvariable=lang_var, values=["English", "繁體中文", "한국어"], width=12)
 lang_menu.pack(side=RIGHT)
 lang_menu.bind("<<ComboboxSelected>>", lambda e: update_language())
+
+# ======================
+# Close handler (stop listeners cleanly)
+# ======================
+def on_close():
+    global running, fullscreen
+    running = False
+    fullscreen = False
+    try:
+        root.attributes("-fullscreen", False)
+    except:
+        pass
+    try:
+        if kb_listener:
+            kb_listener.stop()
+        if ms_listener:
+            ms_listener.stop()
+    except:
+        pass
+    try:
+        root.destroy()
+    except:
+        pass
+
+root.protocol("WM_DELETE_WINDOW", on_close)
+
+# initial scale apply after widgets exist
+root.after(0, lambda: apply_scale(1.0))
 
 # Start background systems
 threading.Thread(target=autoclicker_thread, daemon=True).start()
 start_listeners()
 
 root.mainloop()
-
