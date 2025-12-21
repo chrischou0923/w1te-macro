@@ -14,15 +14,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Show repo files (debug)
-        run: |
-          pwd
-          ls -la
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -30,11 +25,19 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Find entry file (w1te_macro.py)
+        run: |
+          ENTRY=$(find . -type f -name "w1te_macro.py" -print -quit)
+          echo "ENTRY=$ENTRY" >> $GITHUB_ENV
+          echo "Found entry: $ENTRY"
+          ls -la
+
       - name: Build macOS app
         run: |
-          pyinstaller --windowed --onefile --name W1teMacro --icon icon.icns w1te_macro.py
+          python -m PyInstaller --windowed --onefile --name W1teMacro --icon icon.icns "$ENTRY"
+          ls -la dist
 
-      - name: Upload macOS artifact
+      - name: Upload macOS App
         uses: actions/upload-artifact@v4
         with:
           name: W1teMacro-macOS
@@ -48,15 +51,10 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Show repo files (debug)
-        run: |
-          cd
-          dir
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -64,11 +62,22 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Build Windows EXE
+      - name: Find entry file (w1te_macro.py)
+        shell: pwsh
         run: |
-          pyinstaller --windowed --onefile --name W1teMacro --icon icon.ico w1te_macro.py
+          $entry = Get-ChildItem -Recurse -Filter "w1te_macro.py" | Select-Object -First 1
+          if (-not $entry) { throw "w1te_macro.py not found in repo" }
+          "ENTRY=$($entry.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Found entry: $($entry.FullName)"
+          dir
 
-      - name: Upload Windows artifact
+      - name: Build Windows EXE
+        shell: pwsh
+        run: |
+          python -m PyInstaller --windowed --onefile --name W1teMacro --icon icon.ico "$env:ENTRY"
+          dir dist
+
+      - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
         with:
           name: W1teMacro-Windows
