@@ -3,6 +3,21 @@ from tkinter import messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from pynput import keyboard, mouse
+
+# ===== Mouse button compatibility (macOS safe) =====
+def get_mouse_button(name: str, fallback="left"):
+    """
+    name: 'left'/'right'/'middle'/'x1'/'x2'
+    If x1/x2 not supported on this OS/pynput build, fallback to left/right/middle.
+    """
+    name = (name or "").lower()
+
+    # Some platforms don't have x1/x2 at all
+    if name in ("x1", "x2") and not hasattr(mouse.Button, name):
+        name = fallback
+
+    return getattr(mouse.Button, name, getattr(mouse.Button, fallback, mouse.Button.left))
+
 import threading
 import time
 import tkinter.font as tkfont
@@ -76,27 +91,21 @@ hotkey_type = _loaded_settings.get("hotkey_type", "special")      # "char" or "s
 hotkey_char = str(_loaded_settings.get("hotkey_char", "f")).lower()[:1]
 _hotkey_special_name = str(_loaded_settings.get("hotkey_special", "f1")).lower()
 hotkey_special = getattr(keyboard.Key, _hotkey_special_name, keyboard.Key.f1)
-# ---- Safe mouse button map (mac may not have x1/x2) ----
-_mouse_map = {
-    "left": mouse.Button.left,
-    "right": mouse.Button.right,
-    "middle": mouse.Button.middle,
-}
-
-# only add x1/x2 if they exist on this platform/pynput build
-if hasattr(mouse.Button, "x1"):
-    _mouse_map["x1"] = mouse.Button.x1
-if hasattr(mouse.Button, "x2"):
-    _mouse_map["x2"] = mouse.Button.x2
 
 # Hotkey mouse button (fallback to left if missing)
-_hotkey_mouse = str(_loaded_settings.get("hotkey_mouse_btn", "left")).lower()
-hotkey_mouse_btn = _mouse_map.get(_hotkey_mouse, mouse.Button.left)
+_hotkey_mouse = str(_loaded_settings.get("hotkey_mouse_btn", "x1")).lower()
+hotkey_mouse_btn = get_mouse_button(_hotkey_mouse, fallback="left")
+
+# ✅ Output storage（你原貼的版本缺這段，gather_settings 會炸）
+output_kind = _loaded_settings.get("output_kind", "keyboard")      # "keyboard" or "mouse"
+output_type = _loaded_settings.get("output_type", "char")         # "char" or "special"
+output_char = str(_loaded_settings.get("output_char", "f")).lower()[:1]
+_output_special_name = str(_loaded_settings.get("output_special", "f")).lower()
+output_special = getattr(keyboard.Key, _output_special_name, keyboard.Key.f1 if _output_special_name == "f1" else keyboard.Key.f1)
 
 # Output mouse button (fallback to left if missing)
 _output_mouse = str(_loaded_settings.get("output_mouse_btn", "left")).lower()
-output_mouse_btn = _mouse_map.get(_output_mouse, mouse.Button.left)
-
+output_mouse_btn = get_mouse_button(_output_mouse, fallback="left")
 
 # ✅ Humanize / Jitter (persisted)
 jitter_on = bool(_loaded_settings.get("jitter_on", False))
@@ -484,9 +493,10 @@ def _mouse_btn_to_str(btn):
     if btn == mouse.Button.left: return "left"
     if btn == mouse.Button.right: return "right"
     if btn == mouse.Button.middle: return "middle"
+    # x1/x2 might not exist on mac; guard with hasattr
     if hasattr(mouse.Button, "x1") and btn == mouse.Button.x1: return "x1"
     if hasattr(mouse.Button, "x2") and btn == mouse.Button.x2: return "x2"
-    return str(btn)
+    return "left"
 
 def _key_to_display(key_obj):
     return str(key_obj).replace("Key.", "").upper()
