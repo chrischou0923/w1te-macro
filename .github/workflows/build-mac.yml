@@ -9,7 +9,6 @@ jobs:
   build-mac:
     name: Build macOS App
     runs-on: macos-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -17,25 +16,56 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller matplotlib
 
-      - name: Find entry file (w1te_macro.py)
+      - name: Find entry + icon (mac)
+        shell: bash
         run: |
-          ENTRY=$(find . -type f -name "w1te_macro.py" -print -quit)
+          ENTRY="$(python - <<'PY'
+import os
+target = None
+for root, dirs, files in os.walk("."):
+    for f in files:
+        if f == "w1te_macro.py":
+            target = os.path.join(root, f)
+            break
+    if target: break
+print(target or "")
+PY
+)"
+          if [ -z "$ENTRY" ]; then echo "w1te_macro.py not found"; exit 1; fi
           echo "ENTRY=$ENTRY" >> $GITHUB_ENV
           echo "Found entry: $ENTRY"
-          ls -la
+
+          ICON="$(python - <<'PY'
+import os
+target = None
+for root, dirs, files in os.walk("."):
+    for f in files:
+        if f.lower() == "icon.icns":
+            target = os.path.join(root, f)
+            break
+    if target: break
+print(target or "")
+PY
+)"
+          if [ -z "$ICON" ]; then echo "icon.icns not found"; exit 1; fi
+          echo "ICON=$ICON" >> $GITHUB_ENV
+          echo "Found icon: $ICON"
 
       - name: Build macOS app
         run: |
-          python -m PyInstaller --windowed --onefile --name W1teMacro --icon icon.icns "$ENTRY"
-          ls -la dist
+          python -m PyInstaller --noconfirm --clean --windowed --onefile \
+            --name W1teMacro \
+            --icon "$ICON" \
+            --collect-all matplotlib \
+            "$ENTRY"
 
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
@@ -46,7 +76,6 @@ jobs:
   build-windows:
     name: Build Windows EXE
     runs-on: windows-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -54,27 +83,36 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller matplotlib
 
-      - name: Find entry file (w1te_macro.py)
+      - name: Find entry + icon (windows)
         shell: pwsh
         run: |
           $entry = Get-ChildItem -Recurse -File -Filter "w1te_macro.py" | Select-Object -First 1
-          if (-not $entry) { throw "w1te_macro.py not found (file) in repo" }
+          if (-not $entry) { throw "w1te_macro.py (file) not found in repo" }
           "ENTRY=$($entry.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Found entry: $($entry.FullName)"
 
+          $icon = Get-ChildItem -Recurse -File -Filter "icon.ico" | Select-Object -First 1
+          if (-not $icon) { throw "icon.ico (file) not found in repo" }
+          "ICON=$($icon.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Found icon: $($icon.FullName)"
 
       - name: Build Windows EXE
         shell: pwsh
         run: |
-          python -m PyInstaller --windowed --onefile --name W1teMacro --icon icon.ico "$env:ENTRY"
+          python -m PyInstaller --noconfirm --clean --windowed --onefile `
+            --name W1teMacro `
+            --icon "$env:ICON" `
+            --collect-all matplotlib `
+            "$env:ENTRY"
           dir dist
 
       - name: Upload Windows EXE
