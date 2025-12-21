@@ -1,3 +1,20 @@
+# ===== macOS PyInstaller matplotlib SIGTRAP fix =====
+import os
+import sys
+import platform
+
+def _fix_mpl_cache():
+    if platform.system().lower() != "darwin":
+        return
+    try:
+        base = os.path.dirname(sys.argv[0])
+        cache_dir = os.path.join(base, ".mplcache")
+        os.makedirs(cache_dir, exist_ok=True)
+        os.environ["MPLCONFIGDIR"] = cache_dir
+    except Exception as e:
+        print("MPL cache fix failed:", e)
+
+_fix_mpl_cache()
 import tkinter as tk
 from tkinter import messagebox
 import ttkbootstrap as ttk
@@ -2064,3 +2081,4 @@ else:
     root.after(0, safe_start_listeners)     # 其他平台立即啟動
 
 root.mainloop()
+
