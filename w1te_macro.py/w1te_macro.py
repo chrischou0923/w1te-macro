@@ -1,36 +1,29 @@
-# ===============================
-# W1te Macro - Final Release
-# Windows / macOS Compatible
-# ===============================
-
-import tkinter as tk
-from tkinter import messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-
+import tkinter as tk
 from pynput import keyboard, mouse
 import threading
 import time
-import random
 import json
 import os
 import sys
 import platform
 
-# ===============================
-# Safe mouse button resolver (macOS)
-# ===============================
-def safe_mouse_button(name: str):
-    name = (name or "").lower()
-    if hasattr(mouse.Button, name):
-        return getattr(mouse.Button, name)
-    return mouse.Button.left
+# ======================
+# App Config
+# ======================
+APP_NAME = "W1te Macro"
+LIGHT_THEME = "flatly"
+LOGO_SECONDS = 2
 
-# ===============================
-# Paths / settings
-# ===============================
+# ======================
+# Paths & Settings
+# ======================
 def app_dir():
-    return os.path.dirname(os.path.abspath(sys.argv[0]))
+    try:
+        return os.path.dirname(os.path.abspath(sys.argv[0]))
+    except:
+        return os.getcwd()
 
 SETTINGS_PATH = os.path.join(app_dir(), "settings.json")
 
@@ -44,190 +37,197 @@ def load_settings():
 def save_settings(data):
     try:
         with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(data, f, indent=2)
     except:
         pass
 
 settings = load_settings()
 
-# ===============================
-# App config
-# ===============================
-APP_NAME = "W1te Macro"
-LIGHT = "flatly"
-DARK = "darkly"
-
-# ===============================
-# Globals
-# ===============================
+# ======================
+# State
+# ======================
 running = False
 selected_cps = int(settings.get("cps", 100))
 mode = settings.get("mode", "toggle")
+hotkey = settings.get("hotkey", "f")
+output_mode = settings.get("output", "keyboard")  # keyboard / mouse
 
-hotkey_key = settings.get("hotkey", "f1")
-output_key = settings.get("output", "left")
+capture_hotkey = False
 
-jitter_on = settings.get("jitter", False)
-jitter_pct = float(settings.get("jitter_pct", 0.12))
+kb_controller = keyboard.Controller()
+mouse_controller = mouse.Controller()
 
-# ===============================
-# Controllers
-# ===============================
-kb = keyboard.Controller()
-ms = mouse.Controller()
+# ======================
+# Language
+# ======================
+LANG = {
+    "English": {
+        "title": "W1te Auto Clicker",
+        "hotkey": "Hotkey",
+        "detect": "Detect",
+        "mode": "Mode",
+        "toggle": "Toggle",
+        "hold": "Hold",
+        "speed": "Speed (CPS)",
+        "output": "Output",
+        "keyboard": "Key (F)",
+        "mouse": "Mouse Left",
+        "status_wait": "Waiting",
+        "status_run": "Clicking",
+    },
+    "繁體中文": {
+        "title": "W1te 自動連點器",
+        "hotkey": "啟動熱鍵",
+        "detect": "偵測",
+        "mode": "模式",
+        "toggle": "開關式",
+        "hold": "按壓式",
+        "speed": "速度 (CPS)",
+        "output": "輸出方式",
+        "keyboard": "鍵盤 F",
+        "mouse": "滑鼠左鍵",
+        "status_wait": "等待中",
+        "status_run": "連點中",
+    },
+    "한국어": {
+        "title": "W1te 오토 클릭커",
+        "hotkey": "핫키",
+        "detect": "감지",
+        "mode": "모드",
+        "toggle": "토글",
+        "hold": "홀드",
+        "speed": "속도 (CPS)",
+        "output": "출력",
+        "keyboard": "키보드 F",
+        "mouse": "마우스 왼쪽",
+        "status_wait": "대기",
+        "status_run": "클릭 중",
+    }
+}
 
-# ===============================
-# CPS Test (safe – no trace trap)
-# ===============================
-TEST_RUNNING = False
-TEST_START = 0
-TEST_EVENTS = []
+lang_name = settings.get("lang", "English")
+L = LANG[lang_name]
 
-def record_emit():
-    if TEST_RUNNING:
-        TEST_EVENTS.append(time.perf_counter() - TEST_START)
-
-# ===============================
-# Auto click thread
-# ===============================
-def click_loop():
+# ======================
+# Auto Click Thread
+# ======================
+def clicker():
     global running
     while True:
         if running:
-            try:
-                if output_key in ("left", "right", "middle", "x1", "x2"):
-                    ms.click(safe_mouse_button(output_key))
-                else:
-                    kb.press(output_key)
-                    kb.release(output_key)
-
-                record_emit()
-
-                delay = 1 / max(1, selected_cps)
-                if jitter_on:
-                    delay *= random.uniform(1 - jitter_pct, 1 + jitter_pct)
-
-                time.sleep(max(0.001, delay))
-            except:
-                running = False
+            if output_mode == "keyboard":
+                kb_controller.press("f")
+                kb_controller.release("f")
+            else:
+                mouse_controller.click(mouse.Button.left)
+            time.sleep(1 / max(1, selected_cps))
         else:
             time.sleep(0.05)
 
-# ===============================
-# Hotkey handling
-# ===============================
+# ======================
+# Listener
+# ======================
 def on_press(key):
-    global running
-    try:
-        name = key.char.lower()
-    except:
-        name = str(key).replace("Key.", "").lower()
+    global running, capture_hotkey, hotkey
 
-    if name == hotkey_key:
-        if mode == "toggle":
-            running = not running
-        else:
+    if capture_hotkey:
+        try:
+            hotkey = key.char.lower()
+        except:
+            hotkey = str(key).replace("Key.", "")
+        hotkey_entry.delete(0, "end")
+        hotkey_entry.insert(0, hotkey.upper())
+        capture_hotkey = False
+        save_all()
+        return
+
+    if mode_var.get() == "hold":
+        if str(key).replace("Key.", "").lower() == hotkey:
             running = True
+            status_var.set(L["status_run"])
+
+    if mode_var.get() == "toggle":
+        if str(key).replace("Key.", "").lower() == hotkey:
+            running = not running
+            status_var.set(L["status_run"] if running else L["status_wait"])
 
 def on_release(key):
     global running
-    if mode == "hold":
-        running = False
+    if mode_var.get() == "hold":
+        if str(key).replace("Key.", "").lower() == hotkey:
+            running = False
+            status_var.set(L["status_wait"])
 
-keyboard.Listener(on_press=on_press, on_release=on_release).start()
+listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+listener.start()
 
-# ===============================
+# ======================
 # UI
-# ===============================
-theme = DARK if settings.get("dark", False) else LIGHT
-root = ttk.Window(APP_NAME, themename=theme, size=(900, 520))
+# ======================
+root = ttk.Window(title=APP_NAME, themename=LIGHT_THEME, size=(420, 320))
 root.resizable(False, False)
 
-# ===============================
-# Layout
-# ===============================
-main = ttk.Frame(root, padding=14)
-main.pack(fill=BOTH, expand=True)
+title = ttk.Label(root, text=L["title"], font=("Segoe UI", 18, "bold"))
+title.pack(pady=10)
 
-left = ttk.Frame(main)
-left.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 10))
+frm = ttk.Frame(root, padding=10)
+frm.pack(fill=X)
 
-right = ttk.Frame(main)
-right.pack(side=RIGHT, fill=BOTH)
+# Hotkey
+ttk.Label(frm, text=L["hotkey"]).grid(row=0, column=0, sticky=W)
+hotkey_entry = ttk.Entry(frm, width=8)
+hotkey_entry.insert(0, hotkey.upper())
+hotkey_entry.grid(row=0, column=1, padx=6)
 
-# ===============================
-# Left: Settings
-# ===============================
-ttk.Label(left, text="Settings", font=("Segoe UI", 16, "bold")).pack(anchor=W)
+def start_detect():
+    global capture_hotkey
+    capture_hotkey = True
 
-def apply():
-    global selected_cps, mode
-    selected_cps = int(cps_var.get())
+ttk.Button(frm, text=L["detect"], command=start_detect).grid(row=0, column=2)
+
+# Mode
+ttk.Label(frm, text=L["mode"]).grid(row=1, column=0, sticky=W, pady=6)
+mode_var = ttk.StringVar(value=mode)
+ttk.Radiobutton(frm, text=L["toggle"], variable=mode_var, value="toggle").grid(row=1, column=1)
+ttk.Radiobutton(frm, text=L["hold"], variable=mode_var, value="hold").grid(row=1, column=2)
+
+# CPS
+ttk.Label(frm, text=L["speed"]).grid(row=2, column=0, sticky=W, pady=6)
+cps_var = ttk.StringVar(value=str(selected_cps))
+ttk.Combobox(frm, textvariable=cps_var, values=["10","20","50","100","200","300"], width=8).grid(row=2, column=1)
+
+# Output
+ttk.Label(frm, text=L["output"]).grid(row=3, column=0, sticky=W, pady=6)
+output_var = ttk.StringVar(value=output_mode)
+ttk.Radiobutton(frm, text=L["keyboard"], variable=output_var, value="keyboard").grid(row=3, column=1)
+ttk.Radiobutton(frm, text=L["mouse"], variable=output_var, value="mouse").grid(row=3, column=2)
+
+# Status
+status_var = ttk.StringVar(value=L["status_wait"])
+ttk.Label(root, textvariable=status_var, bootstyle="secondary").pack(pady=10)
+
+# ======================
+# Save
+# ======================
+def save_all():
+    global selected_cps, output_mode, mode
+    try:
+        selected_cps = int(cps_var.get())
+    except:
+        selected_cps = 100
+    output_mode = output_var.get()
     mode = mode_var.get()
     save_settings({
-        "cps": selected_cps,
+        "lang": lang_name,
+        "hotkey": hotkey,
         "mode": mode,
-        "hotkey": hotkey_key,
-        "output": output_key,
-        "jitter": jitter_var.get(),
-        "jitter_pct": jitter_scale.get(),
-        "dark": theme_var.get()
+        "cps": selected_cps,
+        "output": output_mode,
     })
 
-cps_var = ttk.StringVar(value=str(selected_cps))
-ttk.Label(left, text="CPS").pack(anchor=W, pady=(10, 0))
-ttk.Combobox(left, values=["10","20","50","100","200","300","500"], textvariable=cps_var, width=10).pack(anchor=W)
+root.protocol("WM_DELETE_WINDOW", lambda: (save_all(), root.destroy()))
 
-mode_var = ttk.StringVar(value=mode)
-ttk.Radiobutton(left, text="Toggle", value="toggle", variable=mode_var).pack(anchor=W)
-ttk.Radiobutton(left, text="Hold", value="hold", variable=mode_var).pack(anchor=W)
-
-jitter_var = ttk.BooleanVar(value=jitter_on)
-ttk.Checkbutton(left, text="Humanize (Jitter)", variable=jitter_var).pack(anchor=W, pady=(10,0))
-jitter_scale = ttk.Scale(left, from_=0, to=0.3)
-jitter_scale.set(jitter_pct)
-jitter_scale.pack(anchor=W)
-
-ttk.Button(left, text="Apply", command=apply, bootstyle="primary").pack(anchor=W, pady=12)
-
-# ===============================
-# Right: CPS Test (embedded)
-# ===============================
-ttk.Label(right, text="CPS Test", font=("Segoe UI", 16, "bold")).pack(anchor=W)
-
-cps_label = ttk.Label(right, text="0.0 CPS", font=("Segoe UI", 32, "bold"))
-cps_label.pack(pady=20)
-
-def start_test():
-    global TEST_RUNNING, TEST_START, TEST_EVENTS
-    TEST_EVENTS.clear()
-    TEST_START = time.perf_counter()
-    TEST_RUNNING = True
-    root.after(5000, finish_test)
-    update_test()
-
-def update_test():
-    if not TEST_RUNNING:
-        return
-    elapsed = time.perf_counter() - TEST_START
-    cps = len(TEST_EVENTS) / max(0.1, elapsed)
-    cps_label.config(text=f"{cps:.1f} CPS")
-    root.after(100, update_test)
-
-def finish_test():
-    global TEST_RUNNING
-    TEST_RUNNING = False
-    cps = len(TEST_EVENTS) / 5
-    messagebox.showinfo("CPS Test", f"Average CPS: {cps:.1f}")
-
-ttk.Button(right, text="Start CPS Test", bootstyle="success", command=start_test).pack()
-
-# ===============================
-# Start threads
-# ===============================
-threading.Thread(target=click_loop, daemon=True).start()
-
+threading.Thread(target=clicker, daemon=True).start()
 root.mainloop()
-
 
 
