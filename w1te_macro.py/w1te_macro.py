@@ -76,24 +76,27 @@ hotkey_type = _loaded_settings.get("hotkey_type", "special")      # "char" or "s
 hotkey_char = str(_loaded_settings.get("hotkey_char", "f")).lower()[:1]
 _hotkey_special_name = str(_loaded_settings.get("hotkey_special", "f1")).lower()
 hotkey_special = getattr(keyboard.Key, _hotkey_special_name, keyboard.Key.f1)
-_hotkey_mouse = str(_loaded_settings.get("hotkey_mouse_btn", "x1")).lower()
-hotkey_mouse_btn = mouse.Button.x1 if _hotkey_mouse == "x1" else mouse.Button.x2 if _hotkey_mouse == "x2" else mouse.Button.x1
-
-# Output key storage (detect keyboard/mouse)
-output_kind = _loaded_settings.get("output_kind", "keyboard")
-output_type = _loaded_settings.get("output_type", "char")
-output_char = str(_loaded_settings.get("output_char", "f")).lower()[:1]
-_output_special_name = str(_loaded_settings.get("output_special", "space")).lower()
-output_special = getattr(keyboard.Key, _output_special_name, keyboard.Key.space)
-_output_mouse = str(_loaded_settings.get("output_mouse_btn", "left")).lower()
+# ---- Safe mouse button map (mac may not have x1/x2) ----
 _mouse_map = {
     "left": mouse.Button.left,
     "right": mouse.Button.right,
     "middle": mouse.Button.middle,
-    "x1": mouse.Button.x1,
-    "x2": mouse.Button.x2,
 }
+
+# only add x1/x2 if they exist on this platform/pynput build
+if hasattr(mouse.Button, "x1"):
+    _mouse_map["x1"] = mouse.Button.x1
+if hasattr(mouse.Button, "x2"):
+    _mouse_map["x2"] = mouse.Button.x2
+
+# Hotkey mouse button (fallback to left if missing)
+_hotkey_mouse = str(_loaded_settings.get("hotkey_mouse_btn", "left")).lower()
+hotkey_mouse_btn = _mouse_map.get(_hotkey_mouse, mouse.Button.left)
+
+# Output mouse button (fallback to left if missing)
+_output_mouse = str(_loaded_settings.get("output_mouse_btn", "left")).lower()
 output_mouse_btn = _mouse_map.get(_output_mouse, mouse.Button.left)
+
 
 # ✅ Humanize / Jitter (persisted)
 jitter_on = bool(_loaded_settings.get("jitter_on", False))
@@ -481,8 +484,8 @@ def _mouse_btn_to_str(btn):
     if btn == mouse.Button.left: return "left"
     if btn == mouse.Button.right: return "right"
     if btn == mouse.Button.middle: return "middle"
-    if btn == mouse.Button.x1: return "x1"
-    if btn == mouse.Button.x2: return "x2"
+    if hasattr(mouse.Button, "x1") and btn == mouse.Button.x1: return "x1"
+    if hasattr(mouse.Button, "x2") and btn == mouse.Button.x2: return "x2"
     return str(btn)
 
 def _key_to_display(key_obj):
