@@ -23,11 +23,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install matplotlib pyinstaller
 
       - name: Build macOS app
         run: |
-          pyinstaller --windowed --onefile w1te_macro.py/w1te_macro.py
+          pyinstaller --windowed --onefile w1te_macro.py \
+            --name W1teMacro \
+            --collect-all matplotlib \
+            --hidden-import matplotlib.backends.backend_tkagg \
+            --hidden-import matplotlib.backends.backend_agg \
+            --hidden-import matplotlib.ft2font
 
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
@@ -52,13 +57,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install matplotlib pyinstaller
 
-      - name: Build macOS app
-        run: 
-         pyinstaller --windowed --onefile --icon icon.icns --name W1teMacro w1te_macro.py/w1te_macro.py
-
-
+      - name: Build Windows app
+        run: |
+          pyinstaller --windowed --onefile w1te_macro.py `
+            --name W1teMacro `
+            --icon icon.ico `
+            --collect-all matplotlib `
+            --hidden-import matplotlib.backends.backend_tkagg `
+            --hidden-import matplotlib.backends.backend_agg `
+            --hidden-import matplotlib.ft2font
 
       - name: Upload Windows EXE
         uses: actions/upload-artifact@v4
