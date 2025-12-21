@@ -1973,7 +1973,6 @@ def go_main_direct():
     apply_all_settings()
     update_hotkey_info()
     update_output_info()
-    start_listeners()
     _refresh_permission_status()
     schedule_save()
 
@@ -2036,6 +2035,7 @@ root.after(LOGO_SECONDS * 1000, after_logo)
 
 threading.Thread(target=autoclicker_thread, daemon=True).start()
 
+# 先做 UI 初始化（不要在這裡啟動 listeners）
 root.after(
     0,
     lambda: (
@@ -2046,10 +2046,21 @@ root.after(
         update_output_info(),
         check_self_trigger_warning(),
         on_jitter_change(),
-        start_listeners(),
         _refresh_permission_status(),
         schedule_save()
     )
 )
+
+# ✅ 安全延遲啟動 listeners（macOS 避免 trace trap）
+def safe_start_listeners():
+    try:
+        start_listeners()
+    except Exception as e:
+        print("Listener start failed:", e)
+
+if platform.system().lower() == "darwin":
+    root.after(2000, safe_start_listeners)  # mac 延遲 2 秒
+else:
+    root.after(0, safe_start_listeners)     # 其他平台立即啟動
 
 root.mainloop()
