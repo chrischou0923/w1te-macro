@@ -21,46 +21,37 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller matplotlib
 
-      - name: Debug list (mac)
-        run: |
-          ls -la
-          find . -maxdepth 4 -type f -name "*.py" -o -name "*.ico" -o -name "*.icns" | sed -n '1,200p'
-
       - name: Find entry + icns (mac)
         run: |
           python - <<'PY'
 import os, sys
-
 entry = None
 icns = None
-
-for root, dirs, files in os.walk("."):
+for root, _, files in os.walk("."):
     for f in files:
         lf = f.lower()
         if lf == "w1te_macro.py":
             entry = os.path.join(root, f)
         if lf == "icon.icns":
             icns = os.path.join(root, f)
-
 print("ENTRY:", entry)
 print("ICNS :", icns)
-
-if not entry:
-    sys.exit("ERROR: w1te_macro.py not found")
-if not icns:
-    sys.exit("ERROR: icon.icns (ICON.ICNS) not found")
-
+if not entry: sys.exit("ERROR: w1te_macro.py not found")
+if not icns:  sys.exit("ERROR: icon.icns not found")
 with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
     env.write(f"ENTRY={entry}\n")
     env.write(f"ICON={icns}\n")
 PY
 
-      - name: Build macOS app
+      - name: Build macOS
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --onefile \
             --name W1teMacro \
             --icon "$ICON" \
             --collect-all matplotlib \
+            --hidden-import matplotlib.backends.backend_tkagg \
+            --hidden-import matplotlib.backends._backend_tk \
+            --hidden-import matplotlib.backends._tkagg \
             "$ENTRY"
 
       - uses: actions/upload-artifact@v4
@@ -84,22 +75,14 @@ PY
           pip install -r requirements.txt
           pip install pyinstaller matplotlib
 
-      - name: Debug list (win)
-        shell: pwsh
-        run: |
-          dir
-          Get-ChildItem -Recurse -File | Where-Object {
-            $_.Name -match '\.py$' -or $_.Name -match '\.ico$' -or $_.Name -match '\.icns$'
-          } | Select-Object -First 200 FullName
-
       - name: Find entry + ico (win)
         shell: pwsh
         run: |
           $entry = Get-ChildItem -Recurse -File | Where-Object { $_.Name -ieq "w1te_macro.py" } | Select-Object -First 1
-          if (-not $entry) { throw "ERROR: w1te_macro.py not found (file)" }
+          if (-not $entry) { throw "ERROR: w1te_macro.py not found" }
 
           $ico = Get-ChildItem -Recurse -File | Where-Object { $_.Name -ieq "icon.ico" } | Select-Object -First 1
-          if (-not $ico) { throw "ERROR: icon.ico (ICON.ICO) not found" }
+          if (-not $ico) { throw "ERROR: icon.ico not found" }
 
           "ENTRY=$($entry.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "ICON=$($ico.FullName)"   | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -120,6 +103,9 @@ PY
             --name W1teMacro `
             --icon "$env:ICON" `
             --collect-all matplotlib `
+            --hidden-import matplotlib.backends.backend_tkagg `
+            --hidden-import matplotlib.backends._backend_tk `
+            --hidden-import matplotlib.backends._tkagg `
             "$env:ENTRY"
           dir dist
 
