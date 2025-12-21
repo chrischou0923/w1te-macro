@@ -24,30 +24,26 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller matplotlib
 
-      - name: Find entry + icns
+      - name: Locate entry + icon
         shell: bash
         run: |
-          python - <<'PY'
-import os, sys
-entry = None
-icns = None
-for root, _, files in os.walk("."):
-    for f in files:
-        lf = f.lower()
-        if lf == "w1te_macro.py":
-            entry = os.path.join(root, f)
-        if lf == "icon.icns":
-            icns = os.path.join(root, f)
-print("ENTRY:", entry)
-print("ICNS :", icns)
-if not entry:
-    sys.exit("ERROR: w1te_macro.py not found")
-if not icns:
-    sys.exit("ERROR: icon.icns not found")
-with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
-    env.write(f"ENTRY={entry}\n")
-    env.write(f"ICON={icns}\n")
-PY
+          ENTRY="$(find . -maxdepth 6 -type f -iname 'w1te_macro.py' -print -quit)"
+          ICON="$(find . -maxdepth 8 -type f -iname 'icon.icns' -print -quit)"
+
+          echo "ENTRY=$ENTRY" >> "$GITHUB_ENV"
+          echo "ICON=$ICON"   >> "$GITHUB_ENV"
+
+          echo "ENTRY = $ENTRY"
+          echo "ICON  = $ICON"
+
+          if [ -z "$ENTRY" ]; then
+            echo "ERROR: w1te_macro.py not found"
+            exit 1
+          fi
+          if [ -z "$ICON" ]; then
+            echo "ERROR: icon.icns not found"
+            exit 1
+          fi
 
       - name: Build macOS
         shell: bash
