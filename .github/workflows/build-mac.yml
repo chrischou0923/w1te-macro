@@ -14,6 +14,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Show repo files (debug)
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 4 -type f -name "*.py" -print
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -25,9 +31,32 @@ jobs:
           pip install -r requirements.txt
           pip install matplotlib pyinstaller
 
-      - name: Build macOS app
+      - name: Locate entry script
+        id: locate
+        shell: bash
         run: |
-          pyinstaller --windowed --onefile w1te_macro.py \
+          set -e
+          # 優先找常見檔名（你可以自行加）
+          CANDIDATES=("w1te_macro.py" "main.py" "app.py")
+          ENTRY=""
+          for f in "${CANDIDATES[@]}"; do
+            if [ -f "$f" ]; then ENTRY="$f"; break; fi
+          done
+          # 找不到就全 repo 搜尋
+          if [ -z "$ENTRY" ]; then
+            ENTRY="$(find . -maxdepth 5 -type f -name "w1te_macro.py" | head -n 1)"
+          fi
+          if [ -z "$ENTRY" ]; then
+            echo "ENTRY script not found. Please rename your main script to w1te_macro.py or update workflow."
+            exit 1
+          fi
+          echo "Found entry: $ENTRY"
+          echo "entry=$ENTRY" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS app
+        shell: bash
+        run: |
+          pyinstaller --windowed --onefile "${{ steps.locate.outputs.entry }}" \
             --name W1teMacro \
             --collect-all matplotlib \
             --hidden-import matplotlib.backends.backend_tkagg \
@@ -48,6 +77,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Show repo files (debug)
+        run: |
+          cd
+          dir
+          powershell -Command "Get-ChildItem -Recurse -Depth 4 -Filter *.py | Select-Object FullName"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -59,11 +94,42 @@ jobs:
           pip install -r requirements.txt
           pip install matplotlib pyinstaller
 
-      - name: Build Windows app
+      - name: Locate entry script
+        id: locate
+        shell: pwsh
         run: |
-          pyinstaller --windowed --onefile w1te_macro.py `
+          $candidates = @("w1te_macro.py","main.py","app.py")
+          $entry = $null
+
+          foreach ($c in $candidates) {
+            if (Test-Path $c) { $entry = $c; break }
+          }
+
+          if (-not $entry) {
+            $found = Get-ChildItem -Recurse -Depth 5 -Filter "w1te_macro.py" | Select-Object -First 1
+            if ($found) { $entry = $found.FullName }
+          }
+
+          if (-not $entry) {
+            Write-Error "ENTRY script not found. Rename your main script to w1te_macro.py or update workflow."
+            exit 1
+          }
+
+          Write-Host "Found entry: $entry"
+          "entry=$entry" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Build Windows app
+        shell: pwsh
+        run: |
+          $entry = "${{ steps.locate.outputs.entry }}"
+
+          # Windows icon 必須是 .ico；如果 repo 沒有 icon.ico 就不加 icon
+          $iconArg = @()
+          if (Test-Path "icon.ico") { $iconArg = @("--icon","icon.ico") }
+
+          pyinstaller --windowed --onefile $entry `
             --name W1teMacro `
-            --icon icon.ico `
+            @iconArg `
             --collect-all matplotlib `
             --hidden-import matplotlib.backends.backend_tkagg `
             --hidden-import matplotlib.backends.backend_agg `
