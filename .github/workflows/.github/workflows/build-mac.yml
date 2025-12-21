@@ -20,23 +20,30 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        working-directory: w1te_macro.py
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
       - name: Build macOS app
+        working-directory: w1te_macro.py
         run: |
-          python -m PyInstaller --windowed --onefile \
+          python -m PyInstaller --windowed \
             --name W1teMacro \
             --icon icon.icns \
             w1te_macro.py
+
+      - name: Zip macOS .app
+        working-directory: w1te_macro.py
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent dist/W1teMacro.app W1teMacro-macOS.zip
 
       - name: Upload macOS App
         uses: actions/upload-artifact@v4
         with:
           name: W1teMacro-macOS
-          path: dist/
+          path: w1te_macro.py/W1teMacro-macOS.zip
 
   build-windows:
     name: Build Windows EXE
@@ -52,15 +59,17 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
+        working-directory: w1te_macro.py
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
 
       - name: Build Windows exe
+        working-directory: w1te_macro.py
         shell: pwsh
         run: |
-          python -m PyInstaller --windowed --onefile `
+          python -m PyInstaller --windowed --onefile --clean `
             --name W1teMacro `
             --icon icon.ico `
             w1te_macro.py
@@ -69,4 +78,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: W1teMacro-Windows
-          path: dist/
+          path: w1te_macro.py/dist/W1teMacro.exe
