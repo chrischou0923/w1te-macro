@@ -65,11 +65,11 @@ jobs:
       - name: Find entry file (w1te_macro.py)
         shell: pwsh
         run: |
-          $entry = Get-ChildItem -Recurse -Filter "w1te_macro.py" | Select-Object -First 1
-          if (-not $entry) { throw "w1te_macro.py not found in repo" }
-          "ENTRY=$($entry.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $entry = Get-ChildItem -Recurse -File -Filter "w1te_macro.py" | Select-Object -First 1
+          if (-not $entry) { throw "w1te_macro.py not found (file) in repo" }
+          "ENTRY=$($entry.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Found entry: $($entry.FullName)"
-          dir
+
 
       - name: Build Windows EXE
         shell: pwsh
