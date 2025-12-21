@@ -1,331 +1,232 @@
-# ======================
-# W1te Macro (macOS-safe, PyInstaller onefile OK)
-# ======================
+# ===============================
+# W1te Macro - Final Release
+# Windows / macOS Compatible
+# ===============================
 
 import tkinter as tk
 from tkinter import messagebox
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+
 from pynput import keyboard, mouse
 import threading
 import time
-import tkinter.font as tkfont
+import random
 import json
 import os
 import sys
 import platform
-import random
 
-# ======================
-# Mouse button compatibility (macOS safe)
-# ======================
-def get_mouse_button(name: str, fallback="left"):
+# ===============================
+# Safe mouse button resolver (macOS)
+# ===============================
+def safe_mouse_button(name: str):
     name = (name or "").lower()
-    if name in ("x1", "x2") and not hasattr(mouse.Button, name):
-        name = fallback
-    return getattr(mouse.Button, name, getattr(mouse.Button, fallback, mouse.Button.left))
+    if hasattr(mouse.Button, name):
+        return getattr(mouse.Button, name)
+    return mouse.Button.left
 
-
-# ======================
-# Matplotlib (LAZY LOAD) – macOS SIGTRAP FIX
-# ======================
-MPL_OK = False
-MPL_ERR = ""
-Figure = None
-FigureCanvasTkAgg = None
-
-def _mpl_config_dir() -> str:
-    try:
-        base = os.path.join(
-            os.path.expanduser("~"),
-            "Library",
-            "Application Support",
-            "W1teMacro",
-            "mplcache",
-        )
-        os.makedirs(base, exist_ok=True)
-        return base
-    except:
-        import tempfile
-        base = os.path.join(tempfile.gettempdir(), "W1teMacro_mplcache")
-        try:
-            os.makedirs(base, exist_ok=True)
-        except:
-            pass
-        return base
-
-def ensure_matplotlib_loaded() -> bool:
-    global MPL_OK, MPL_ERR, Figure, FigureCanvasTkAgg
-    if MPL_OK and Figure and FigureCanvasTkAgg:
-        return True
-    try:
-        os.environ["MPLCONFIGDIR"] = _mpl_config_dir()
-        os.environ["MPLBACKEND"] = "TkAgg"
-        from matplotlib.figure import Figure as _Figure
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg as _FCTK
-        Figure = _Figure
-        FigureCanvasTkAgg = _FCTK
-        MPL_OK = True
-        MPL_ERR = ""
-        return True
-    except Exception as e:
-        MPL_OK = False
-        MPL_ERR = str(e)
-        return False
-
-
-# ======================
-# App Config
-# ======================
-LIGHT_THEME = "flatly"
-DARK_THEME = "darkly"
-APP_NAME = "W1te Macro"
-LOGO_SECONDS = 2
-
-
-# ======================
-# Settings
-# ======================
+# ===============================
+# Paths / settings
+# ===============================
 def app_dir():
-    try:
-        return os.path.dirname(os.path.abspath(sys.argv[0]))
-    except:
-        return os.getcwd()
+    return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 SETTINGS_PATH = os.path.join(app_dir(), "settings.json")
 
 def load_settings():
     try:
         with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
+            return json.load(f)
     except:
         return {}
 
-def write_settings_atomic(data):
+def save_settings(data):
     try:
-        tmp = SETTINGS_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, SETTINGS_PATH)
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
     except:
         pass
 
-_loaded = load_settings()
+settings = load_settings()
 
+# ===============================
+# App config
+# ===============================
+APP_NAME = "W1te Macro"
+LIGHT = "flatly"
+DARK = "darkly"
 
-# ======================
+# ===============================
 # Globals
-# ======================
+# ===============================
 running = False
-selected_cps = int(_loaded.get("cps", 100))
+selected_cps = int(settings.get("cps", 100))
+mode = settings.get("mode", "toggle")
 
-hotkey_kind = _loaded.get("hotkey_kind", "keyboard")
-hotkey_type = _loaded.get("hotkey_type", "special")
-hotkey_char = str(_loaded.get("hotkey_char", "f")).lower()[:1]
-hotkey_special = getattr(keyboard.Key, str(_loaded.get("hotkey_special", "f1")), keyboard.Key.f1)
-hotkey_mouse_btn = get_mouse_button(_loaded.get("hotkey_mouse_btn", "left"))
+hotkey_key = settings.get("hotkey", "f1")
+output_key = settings.get("output", "left")
 
-output_kind = _loaded.get("output_kind", "keyboard")
-output_type = _loaded.get("output_type", "char")
-output_char = str(_loaded.get("output_char", "f")).lower()[:1]
-output_special = getattr(keyboard.Key, str(_loaded.get("output_special", "space")), keyboard.Key.space)
-output_mouse_btn = get_mouse_button(_loaded.get("output_mouse_btn", "left"))
+jitter_on = settings.get("jitter", False)
+jitter_pct = float(settings.get("jitter_pct", 0.12))
 
-jitter_on = bool(_loaded.get("jitter_on", False))
-jitter_pct = float(_loaded.get("jitter_pct", 0.12))
-micro_pause_on = bool(_loaded.get("micro_pause_on", True))
+# ===============================
+# Controllers
+# ===============================
+kb = keyboard.Controller()
+ms = mouse.Controller()
 
-LOCK_HOLD = "HOLD"
-LOCK_TOGGLE = "TOGGLE"
-pressed_keys = set()
-capture_target = None
+# ===============================
+# CPS Test (safe – no trace trap)
+# ===============================
+TEST_RUNNING = False
+TEST_START = 0
+TEST_EVENTS = []
 
-kb_listener = None
-ms_listener = None
+def record_emit():
+    if TEST_RUNNING:
+        TEST_EVENTS.append(time.perf_counter() - TEST_START)
 
-# CPS test
-TEST_BIN = 0.1
-test_running = False
-test_duration = 10
-test_start_t = 0.0
-test_emit_times = []
-test_lock = threading.Lock()
-
-# plot handles (lazy)
-fig = ax = canvas_plot = None
-fig2 = ax2 = canvas_plot2 = None
-
-
-# ======================
-# Helpers
-# ======================
-def record_test_emit():
-    if not test_running:
-        return
-    with test_lock:
-        test_emit_times.append(time.perf_counter() - test_start_t)
-
-
-# ======================
+# ===============================
 # Auto click thread
-# ======================
-def autoclicker_thread():
+# ===============================
+def click_loop():
     global running
-    mc = mouse.Controller()
-    kc = keyboard.Controller()
-
     while True:
         if running:
             try:
-                if output_kind == "mouse":
-                    mc.click(output_mouse_btn)
+                if output_key in ("left", "right", "middle", "x1", "x2"):
+                    ms.click(safe_mouse_button(output_key))
                 else:
-                    if output_type == "char":
-                        kc.press(output_char)
-                        kc.release(output_char)
-                    else:
-                        kc.press(output_special)
-                        kc.release(output_special)
+                    kb.press(output_key)
+                    kb.release(output_key)
 
-                record_test_emit()
+                record_emit()
 
-                base = 1 / max(1, selected_cps)
-                delay = base
+                delay = 1 / max(1, selected_cps)
                 if jitter_on:
-                    delay *= (1 + random.uniform(-jitter_pct, jitter_pct))
-                    if micro_pause_on and random.random() < 0.02:
-                        delay += random.uniform(0.05, 0.12)
+                    delay *= random.uniform(1 - jitter_pct, 1 + jitter_pct)
+
                 time.sleep(max(0.001, delay))
             except:
                 running = False
         else:
             time.sleep(0.05)
 
-
-# ======================
-# Listeners
-# ======================
-def is_hotkey_pressed(key):
-    if hotkey_kind != "keyboard":
-        return False
-    if hotkey_type == "char":
-        try:
-            return key.char and key.char.lower() == hotkey_char
-        except:
-            return False
-    return key == hotkey_special
-
+# ===============================
+# Hotkey handling
+# ===============================
 def on_press(key):
     global running
-    if capture_target:
-        return
-    if hotkey_kind != "keyboard":
-        return
-    if is_hotkey_pressed(key):
-        if LOCK_TOGGLE not in pressed_keys:
-            pressed_keys.add(LOCK_TOGGLE)
+    try:
+        name = key.char.lower()
+    except:
+        name = str(key).replace("Key.", "").lower()
+
+    if name == hotkey_key:
+        if mode == "toggle":
             running = not running
+        else:
+            running = True
 
 def on_release(key):
-    if LOCK_TOGGLE in pressed_keys:
-        pressed_keys.discard(LOCK_TOGGLE)
-
-def on_click(x, y, button, pressed):
     global running
-    if capture_target:
-        return
-    if hotkey_kind != "mouse":
-        return
-    if button != hotkey_mouse_btn:
-        return
-    if pressed:
-        running = not running
+    if mode == "hold":
+        running = False
 
-def start_listeners():
-    global kb_listener, ms_listener
-    kb_listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-    ms_listener = mouse.Listener(on_click=on_click)
-    kb_listener.start()
-    ms_listener.start()
+keyboard.Listener(on_press=on_press, on_release=on_release).start()
 
-
-# ======================
-# CPS Test
-# ======================
-def _make_plot(parent):
-    ensure_matplotlib_loaded()
-    f = Figure(figsize=(6, 3), dpi=100)
-    a = f.add_subplot(111)
-    a.grid(True, alpha=0.25)
-    c = FigureCanvasTkAgg(f, master=parent)
-    c.get_tk_widget().pack(fill=BOTH, expand=True)
-    return f, a, c
-
-def start_cps_test():
-    global test_running, test_start_t, fig, ax, canvas_plot
-    if not ensure_matplotlib_loaded():
-        messagebox.showerror("CPS Test", MPL_ERR)
-        return
-
-    for w in plot_holder.winfo_children():
-        w.destroy()
-
-    fig, ax, canvas_plot = _make_plot(plot_holder)
-
-    test_running = True
-    test_emit_times.clear()
-    test_start_t = time.perf_counter()
-    update_test_tick()
-
-def update_test_tick():
-    global test_running
-    if not test_running:
-        return
-
-    elapsed = time.perf_counter() - test_start_t
-    if elapsed >= test_duration:
-        test_running = False
-        finish_cps_test()
-        return
-
-    with test_lock:
-        count = len(test_emit_times)
-
-    ax.clear()
-    ax.set_ylim(0, max(50, selected_cps * 1.5))
-    ax.bar(["CPS"], [count / max(0.1, elapsed)])
-    canvas_plot.draw_idle()
-
-    root.after(80, update_test_tick)
-
-def finish_cps_test():
-    total = len(test_emit_times)
-    avg = total / max(0.1, test_duration)
-    messagebox.showinfo("Result", f"Avg CPS: {avg:.1f}\nTotal: {total}")
-
-
-# ======================
+# ===============================
 # UI
-# ======================
-root = ttk.Window(APP_NAME, themename=LIGHT_THEME, size=(820, 620))
-root.minsize(580, 460)
+# ===============================
+theme = DARK if settings.get("dark", False) else LIGHT
+root = ttk.Window(APP_NAME, themename=theme, size=(900, 520))
+root.resizable(False, False)
 
-main = ttk.Frame(root, padding=16)
+# ===============================
+# Layout
+# ===============================
+main = ttk.Frame(root, padding=14)
 main.pack(fill=BOTH, expand=True)
 
-ttk.Label(main, text="W1te Macro", font=("Segoe UI", 22, "bold")).pack(anchor=W)
-ttk.Button(main, text="Start CPS Test", bootstyle="info", command=start_cps_test).pack(anchor=W, pady=12)
+left = ttk.Frame(main)
+left.pack(side=LEFT, fill=BOTH, expand=True, padx=(0, 10))
 
-plot_holder = ttk.Frame(main)
-plot_holder.pack(fill=BOTH, expand=True)
-ttk.Label(plot_holder, text="Plot loads when test starts", bootstyle="secondary").pack(pady=20)
+right = ttk.Frame(main)
+right.pack(side=RIGHT, fill=BOTH)
 
-# ======================
-# Start
-# ======================
-threading.Thread(target=autoclicker_thread, daemon=True).start()
-start_listeners()
+# ===============================
+# Left: Settings
+# ===============================
+ttk.Label(left, text="Settings", font=("Segoe UI", 16, "bold")).pack(anchor=W)
+
+def apply():
+    global selected_cps, mode
+    selected_cps = int(cps_var.get())
+    mode = mode_var.get()
+    save_settings({
+        "cps": selected_cps,
+        "mode": mode,
+        "hotkey": hotkey_key,
+        "output": output_key,
+        "jitter": jitter_var.get(),
+        "jitter_pct": jitter_scale.get(),
+        "dark": theme_var.get()
+    })
+
+cps_var = ttk.StringVar(value=str(selected_cps))
+ttk.Label(left, text="CPS").pack(anchor=W, pady=(10, 0))
+ttk.Combobox(left, values=["10","20","50","100","200","300","500"], textvariable=cps_var, width=10).pack(anchor=W)
+
+mode_var = ttk.StringVar(value=mode)
+ttk.Radiobutton(left, text="Toggle", value="toggle", variable=mode_var).pack(anchor=W)
+ttk.Radiobutton(left, text="Hold", value="hold", variable=mode_var).pack(anchor=W)
+
+jitter_var = ttk.BooleanVar(value=jitter_on)
+ttk.Checkbutton(left, text="Humanize (Jitter)", variable=jitter_var).pack(anchor=W, pady=(10,0))
+jitter_scale = ttk.Scale(left, from_=0, to=0.3)
+jitter_scale.set(jitter_pct)
+jitter_scale.pack(anchor=W)
+
+ttk.Button(left, text="Apply", command=apply, bootstyle="primary").pack(anchor=W, pady=12)
+
+# ===============================
+# Right: CPS Test (embedded)
+# ===============================
+ttk.Label(right, text="CPS Test", font=("Segoe UI", 16, "bold")).pack(anchor=W)
+
+cps_label = ttk.Label(right, text="0.0 CPS", font=("Segoe UI", 32, "bold"))
+cps_label.pack(pady=20)
+
+def start_test():
+    global TEST_RUNNING, TEST_START, TEST_EVENTS
+    TEST_EVENTS.clear()
+    TEST_START = time.perf_counter()
+    TEST_RUNNING = True
+    root.after(5000, finish_test)
+    update_test()
+
+def update_test():
+    if not TEST_RUNNING:
+        return
+    elapsed = time.perf_counter() - TEST_START
+    cps = len(TEST_EVENTS) / max(0.1, elapsed)
+    cps_label.config(text=f"{cps:.1f} CPS")
+    root.after(100, update_test)
+
+def finish_test():
+    global TEST_RUNNING
+    TEST_RUNNING = False
+    cps = len(TEST_EVENTS) / 5
+    messagebox.showinfo("CPS Test", f"Average CPS: {cps:.1f}")
+
+ttk.Button(right, text="Start CPS Test", bootstyle="success", command=start_test).pack()
+
+# ===============================
+# Start threads
+# ===============================
+threading.Thread(target=click_loop, daemon=True).start()
+
 root.mainloop()
 
 
